@@ -756,6 +756,9 @@ func isRouteName(name string) bool {
 }
 
 func findMirrorTestName(filePath, symbolName string) string {
+	if strings.Contains(symbolName, "/") || strings.Contains(symbolName, "\\") || strings.Contains(symbolName, ".") || symbolName == "" {
+		return ""
+	}
 	ext := filepath.Ext(filePath)
 	base := strings.TrimSuffix(filepath.Base(filePath), ext)
 	if ext == ".go" && !strings.HasSuffix(base, "_test") {
@@ -775,7 +778,9 @@ func deriveVerifyCommand(filePath string, tests []string) string {
 			if idx := strings.Index(firstTest, " "); idx != -1 {
 				firstTest = firstTest[:idx]
 			}
-			return fmt.Sprintf("go test ./%s -run '^%s$'", dir, firstTest)
+			if !strings.Contains(firstTest, "/") && !strings.Contains(firstTest, ".") && strings.HasPrefix(firstTest, "Test") {
+				return fmt.Sprintf("go test ./%s -run '^%s$'", dir, firstTest)
+			}
 		}
 		return fmt.Sprintf("go test ./%s", dir)
 	case ".rs":
