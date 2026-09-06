@@ -50,9 +50,9 @@ const (
 
 // AnalysisCompleteness captures whether static analysis is complete or degraded/partial.
 type AnalysisCompleteness struct {
-	Status                 string   `json:"status"`                  // "COMPLETE" or "PARTIAL"
+	Status                 string   `json:"status"` // "COMPLETE" or "PARTIAL"
 	IsPartial              bool     `json:"is_partial"`
-	ConfidenceScore        float64  `json:"confidence_score"`        // 0.0 to 1.0
+	ConfidenceScore        float64  `json:"confidence_score"` // 0.0 to 1.0
 	PartialReasons         []string `json:"partial_reasons,omitempty"`
 	SafeFallbackCommands   []string `json:"safe_fallback_commands,omitempty"`
 	VerificationGuidelines []string `json:"verification_guidelines,omitempty"`

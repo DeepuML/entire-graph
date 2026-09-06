@@ -192,10 +192,10 @@ func TestTrack2CurveballIncompleteAnalysis(t *testing.T) {
 		Kind:      "function",
 	}
 	changeStatic := sem.EntityChange{
-		Type:            "modified",
-		Name:            "ComputeChecksum",
-		NewSignature:    "func ComputeChecksum(buf []byte) uint32",
-		AfterStartLine:  15,
+		Type:           "modified",
+		Name:           "ComputeChecksum",
+		NewSignature:   "func ComputeChecksum(buf []byte) uint32",
+		AfterStartLine: 15,
 	}
 	incomingCalls := map[string][]radarEdgeRecord{
 		"sym-1": {
