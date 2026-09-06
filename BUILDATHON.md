@@ -127,12 +127,12 @@ Entire ChangeRadar combines semantic git diffs with Entire Graph's deep caller/c
 
 ## Checkpoint links and what each checkpoint proves
 
-| Checkpoint | Milestone | What It Proves | Link / ID |
-|------------|-----------|----------------|-----------|
-| **CP 1** | Initial Understanding & Architecture | Problem framing, Track 2 design document, schema mapping between diff and impact | `[Checkpoint Link 1]` |
-| **CP 2** | Pre-Noon Stable State (11:45 AM) | Fully working end-to-end `changeradar` CLI, 100% passing unit tests, CI action | `[Checkpoint Link 2]` |
-| **CP 3** | Noon Curveball Response (12:00 PM) | Absorption of the surprise constraint, fresh session resumption, impact analysis | `[Checkpoint Link 3]` |
-| **CP 4** | Final Implementation & Verification | Final polish, documentation, multi-format verification, submission readiness | `[Checkpoint Link 4]` |
+| Checkpoint | Milestone | What It Proves | Commit SHA |
+|------------|-----------|----------------|------------|
+| **CP 1** | Initial Understanding & Architecture | Problem framing, Track 2 design document, schema mapping between diff and impact | Initial Plan |
+| **CP 2** | Pre-Noon Stable State (11:45 AM) | Fully working end-to-end `changeradar` CLI, 100% passing unit tests, CI action | `84f19dcb` |
+| **CP 3** | Noon Curveball Response (12:00 PM) | Absorption of the surprise constraint, fresh session resumption, impact analysis | `2803e234` |
+| **CP 4** | Final Implementation & Verification | Comprehensive test suite, documentation, multi-format verification | `b3b1634e` |
 
 ---
 
@@ -151,9 +151,13 @@ go build -o entire-graph.exe ./cmd/entire-graph
 go build -o entire-graph ./cmd/entire-graph
 ```
 
-### 2. Run unit tests
+### 2. Run unit tests & verification suite
 ```powershell
-go test -v ./internal/cli -run "TestChangeRadar.*"
+# Run the comprehensive Buildathon Track 2 & Curveball verification suite:
+go test -v ./internal/cli -run TestBuildathonTrack2ComprehensiveSuite
+
+# Run all ChangeRadar unit tests:
+go test -v ./internal/cli -run "Test.*ChangeRadar"
 ```
 
 ### 3. Run ChangeRadar on your repository
