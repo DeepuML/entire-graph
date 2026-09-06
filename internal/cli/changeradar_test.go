@@ -175,3 +175,178 @@ func TestRenderChangeRadarOutputs(t *testing.T) {
 		t.Errorf("JSON roundtrip mismatch: %+v", roundtrip)
 	}
 }
+
+// TestTrack2CurveballIncompleteAnalysis verifies the Noon Curveball requirements:
+// 1. Incomplete relationships are not presented as certain.
+// 2. Identifies when analysis is partial (reflection, generated code, dynamic dispatch).
+// 3. Provides a safe fallback or verification path.
+// 4. Distinguishes confirmed structural evidence from heuristic and unverified claims.
+// 5. Existing behavior for fully resolved code continues to work.
+func TestTrack2CurveballIncompleteAnalysis(t *testing.T) {
+	// Case 1: Fully resolved static code
+	symStatic := sem.SymbolRecord{
+		ID:        "sym-1",
+		Name:      "ComputeChecksum",
+		FilePath:  "internal/util/crypto.go",
+		StartLine: 15,
+		Kind:      "function",
+	}
+	changeStatic := sem.EntityChange{
+		Type:            "modified",
+		Name:            "ComputeChecksum",
+		NewSignature:    "func ComputeChecksum(buf []byte) uint32",
+		AfterStartLine:  15,
+	}
+	incomingCalls := map[string][]radarEdgeRecord{
+		"sym-1": {
+			{fromID: "caller-1", toID: "sym-1"},
+		},
+	}
+	symbolsByID := map[string]sem.SymbolRecord{
+		"sym-1":    symStatic,
+		"caller-1": {ID: "caller-1", Name: "SaveFile", FilePath: "internal/io/file.go", StartLine: 40},
+	}
+
+	impactStatic := analyzeSingleSymbolImpact(
+		changeStatic,
+		"internal/util/crypto.go",
+		&symStatic,
+		symbolsByID,
+		incomingCalls,
+		nil,
+		nil,
+		nil,
+		2,
+		15,
+	)
+
+	if impactStatic.EvidenceTier != TierConfirmed {
+		t.Errorf("expected TierConfirmed for static code with callers, got %v", impactStatic.EvidenceTier)
+	}
+	if impactStatic.EvidenceConfidence != "HIGH" {
+		t.Errorf("expected HIGH confidence, got %v", impactStatic.EvidenceConfidence)
+	}
+	if impactStatic.RequiresVerification {
+		t.Errorf("fully resolved static code should not require special verification")
+	}
+
+	// Case 2: Generated file code
+	changeGen := sem.EntityChange{
+		Type:           "modified",
+		Name:           "GeneratedPayload",
+		NewSignature:   "type GeneratedPayload struct",
+		AfterStartLine: 10,
+	}
+	impactGen := analyzeSingleSymbolImpact(
+		changeGen,
+		"internal/cli/testdata/partial_analysis/api_gen.go",
+		nil,
+		symbolsByID,
+		incomingCalls,
+		nil,
+		nil,
+		nil,
+		2,
+		15,
+	)
+
+	if impactGen.EvidenceTier != TierHeuristic {
+		t.Errorf("expected TierHeuristic for generated code, got %v", impactGen.EvidenceTier)
+	}
+	if !impactGen.RequiresVerification {
+		t.Errorf("generated code must require verification")
+	}
+	if !strings.Contains(impactGen.VerificationAdvice, "Auto-generated code") {
+		t.Errorf("expected verification advice for generated code, got: %s", impactGen.VerificationAdvice)
+	}
+
+	// Case 3: Dynamic reflection dispatch
+	changeDynamic := sem.EntityChange{
+		Type:           "modified",
+		Name:           "InvokeDynamicHandler",
+		NewSignature:   "func (d *DynamicDispatcher) Invoke(name string, args ...interface{}) (interface{}, error)",
+		AfterStartLine: 25,
+	}
+	impactDynamic := analyzeSingleSymbolImpact(
+		changeDynamic,
+		"internal/cli/testdata/partial_analysis/dynamic_dispatch.go",
+		nil,
+		symbolsByID,
+		incomingCalls,
+		nil,
+		nil,
+		nil,
+		2,
+		15,
+	)
+
+	if impactDynamic.EvidenceTier != TierHeuristic {
+		t.Errorf("expected TierHeuristic for dynamic reflection, got %v", impactDynamic.EvidenceTier)
+	}
+	if !impactDynamic.RequiresVerification {
+		t.Errorf("dynamic reflection must require verification")
+	}
+
+	// Case 4: Test Report Completeness & Safe Fallback
+	diffResult := sem.Result{
+		Files: []sem.FileChange{
+			{
+				Path:    "dynamic_dispatch.go",
+				Changes: []sem.EntityChange{changeDynamic},
+			},
+		},
+	}
+	snapshot := sem.ProviderSnapshot{
+		Symbols: []sem.SymbolRecord{symStatic},
+	}
+	flags := changeRadarFlags{
+		Depth:   2,
+		Limit:   15,
+		Format:  "text",
+		MinRisk: "all",
+	}
+
+	reportPartial := buildChangeRadarReport(
+		".", "HEAD~1", "HEAD",
+		diffResult,
+		snapshot,
+		flags,
+	)
+
+	if !reportPartial.Completeness.IsPartial {
+		t.Errorf("report containing dynamic dispatch must report IsPartial = true")
+	}
+	if reportPartial.Completeness.Status != "PARTIAL" {
+		t.Errorf("expected status 'PARTIAL', got %q", reportPartial.Completeness.Status)
+	}
+	if len(reportPartial.Completeness.SafeFallbackCommands) == 0 {
+		t.Errorf("expected safe fallback commands when analysis is partial")
+	}
+
+	// Verify safe fallback command includes race detector / full package test
+	hasRaceTest := false
+	for _, cmd := range reportPartial.Completeness.SafeFallbackCommands {
+		if strings.Contains(cmd, "go test") && strings.Contains(cmd, "-race") {
+			hasRaceTest = true
+		}
+	}
+	if !hasRaceTest {
+		t.Errorf("expected go test -race in fallback commands, got: %v", reportPartial.Completeness.SafeFallbackCommands)
+	}
+
+	// Case 5: Verify text rendering of partial analysis includes warning & fallback
+	var textBuf bytes.Buffer
+	if err := renderChangeRadarText(&textBuf, reportPartial); err != nil {
+		t.Fatalf("renderChangeRadarText failed: %v", err)
+	}
+	output := textBuf.String()
+	if !strings.Contains(output, "ANALYSIS CERTAINTY: [PARTIAL]") {
+		t.Errorf("text output missing partial certainty banner: %s", output)
+	}
+	if !strings.Contains(output, "Graph is evidence, not an oracle") {
+		t.Errorf("text output missing curveball principle: %s", output)
+	}
+	if !strings.Contains(output, "Safe Fallback Verification Commands:") {
+		t.Errorf("text output missing safe fallback section: %s", output)
+	}
+}

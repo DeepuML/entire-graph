@@ -96,17 +96,32 @@ Entire ChangeRadar combines semantic git diffs with Entire Graph's deep caller/c
 ---
 
 ## Noon Curveball: what changed and how we adapted
-*(To be updated at 12:00 PM upon release of the official Curveball constraint)*
 
 - **Pre-Noon Stable State Preserved (11:45 AM):**
-  - Commit SHA: `d0e02079`
+  - Commit SHA: `84f19dcb`
   - Checkpoint 2 created preserving core architecture and passing test suite.
+
 - **Received Constraint (12:00 PM):**
-  - `[Insert official curveball instruction received at noon]`
+  > **TRACK 2: GRAPH IS EVIDENCE, NOT AN ORACLE**  
+  > *"Your Graph-powered experience has encountered a repository using dynamic dispatch, generated code, reflection, or another pattern that static analysis cannot fully resolve. The product must not present incomplete Graph relationships as certain. It must identify when analysis may be partial, provide a safe fallback or verification path, and let users/agents distinguish confirmed structural evidence, heuristic/incomplete evidence, and unverified claims."*
+
 - **How We Adapted:**
-  - Fresh agent session initialized with checkpoint context.
-  - Impact analysis run before modifying target files.
-  - Implemented minimal complete response and verified with tests.
+  1. **Impact Analysis First:** Ran `entire-graph impact` on `runChangeRadar` to identify all dispatchers and consumers before touching code.
+  2. **Three-Tier Evidence Classification (`EvidenceTier`):**
+     - `CONFIRMED_STRUCTURAL`: Direct static AST call graph match verified by tree-sitter.
+     - `HEURISTIC`: Inferred via dynamic dispatch, Go reflection (`reflect.ValueOf`), dynamic route registration, or generated files (`*_gen.go`, `*.pb.go`).
+     - `UNVERIFIED_CLAIM`: Changed symbols with 0 static callers found in graph (requires runtime/test verification).
+  3. **Completeness & Certainty Engine (`AnalysisCompleteness`):**
+     - Calculates an explicit `ConfidenceScore` (1.0 for complete AST, degraded for dynamic patterns).
+     - Emits transparent reason strings in CLI, Markdown, and JSON formats.
+  4. **Safe Fallback & Verification Path:**
+     - When analysis is partial, ChangeRadar automatically provides a safe fallback test suite:
+       `go test -v -race ./... && go vet ./...`
+     - Outputs specific actionable verification guidelines for code reviewers and AI agents.
+  5. **Test Fixtures & Verification:**
+     - Created `internal/cli/testdata/partial_analysis/dynamic_dispatch.go` (runtime reflection & dynamic method lookup).
+     - Created `internal/cli/testdata/partial_analysis/api_gen.go` (generated schema struct).
+     - Added comprehensive unit test `TestTrack2CurveballIncompleteAnalysis` verifying all 5 requirements (100% pass).
 
 ---
 

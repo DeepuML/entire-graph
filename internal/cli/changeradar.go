@@ -38,43 +38,68 @@ type radarEdgeRecord struct {
 	evidence []sem.Evidence
 }
 
+// EvidenceTier categorizes the certainty of graph relationships.
+// Follows Track 2 Curveball principle: "Graph is evidence, not an oracle".
+type EvidenceTier string
+
+const (
+	TierConfirmed  EvidenceTier = "CONFIRMED_STRUCTURAL" // Exact static AST call graph match
+	TierHeuristic  EvidenceTier = "HEURISTIC"            // Inferred via dynamic dispatch, reflection, interface duck-typing, or generated code
+	TierUnverified EvidenceTier = "UNVERIFIED_CLAIM"     // Needs source/test verification (0 static callers found or dynamic target)
+)
+
+// AnalysisCompleteness captures whether static analysis is complete or degraded/partial.
+type AnalysisCompleteness struct {
+	Status                 string   `json:"status"`                  // "COMPLETE" or "PARTIAL"
+	IsPartial              bool     `json:"is_partial"`
+	ConfidenceScore        float64  `json:"confidence_score"`        // 0.0 to 1.0
+	PartialReasons         []string `json:"partial_reasons,omitempty"`
+	SafeFallbackCommands   []string `json:"safe_fallback_commands,omitempty"`
+	VerificationGuidelines []string `json:"verification_guidelines,omitempty"`
+}
+
 // SymbolImpact records the blast-radius impact analysis for one changed symbol.
 type SymbolImpact struct {
-	Name            string             `json:"name"`
-	Kind            string             `json:"kind"`
-	FilePath        string             `json:"file_path"`
-	StartLine       int                `json:"start_line"`
-	ChangeType      string             `json:"change_type"` // added, modified, deleted
-	OldSignature    string             `json:"old_signature,omitempty"`
-	NewSignature    string             `json:"new_signature,omitempty"`
-	SignatureDiff   bool               `json:"signature_diff"`
-	RiskScore       int                `json:"risk_score"`
-	RiskLevel       string             `json:"risk_level"` // LOW, MEDIUM, HIGH, CRITICAL
-	RiskFactors     []string           `json:"risk_factors"`
-	DirectCallers   []neighborEndpoint `json:"direct_callers"`
-	Transitive      []neighborEndpoint `json:"transitive_callers"`
-	TypeConsumers   []neighborEndpoint `json:"type_consumers"`
-	Routes          []string           `json:"routes"`
-	CoveringTests   []string           `json:"covering_tests"`
-	SuggestedVerify string             `json:"suggested_verify,omitempty"`
-	IsBlindspot     bool               `json:"is_blindspot"` // callers exist but 0 tests
+	Name                 string             `json:"name"`
+	Kind                 string             `json:"kind"`
+	FilePath             string             `json:"file_path"`
+	StartLine            int                `json:"start_line"`
+	ChangeType           string             `json:"change_type"` // added, modified, deleted
+	OldSignature         string             `json:"old_signature,omitempty"`
+	NewSignature         string             `json:"new_signature,omitempty"`
+	SignatureDiff        bool               `json:"signature_diff"`
+	RiskScore            int                `json:"risk_score"`
+	RiskLevel            string             `json:"risk_level"` // LOW, MEDIUM, HIGH, CRITICAL
+	RiskFactors          []string           `json:"risk_factors"`
+	EvidenceTier         EvidenceTier       `json:"evidence_tier"`
+	EvidenceConfidence   string             `json:"evidence_confidence"` // HIGH, MEDIUM, LOW
+	RequiresVerification bool               `json:"requires_verification"`
+	VerificationAdvice   string             `json:"verification_advice,omitempty"`
+	DirectCallers        []neighborEndpoint `json:"direct_callers"`
+	Transitive           []neighborEndpoint `json:"transitive_callers"`
+	TypeConsumers        []neighborEndpoint `json:"type_consumers"`
+	Routes               []string           `json:"routes"`
+	CoveringTests        []string           `json:"covering_tests"`
+	SuggestedVerify      string             `json:"suggested_verify,omitempty"`
+	IsBlindspot          bool               `json:"is_blindspot"` // callers exist but 0 tests
 }
 
 // ChangeRadarReport is the top-level report returned by changeradar.
 type ChangeRadarReport struct {
-	FormatVersion        int            `json:"format_version"`
-	RepoRoot             string         `json:"repo_root"`
-	BaseRef              string         `json:"base_ref"`
-	HeadRef              string         `json:"head_ref"`
-	OverallRiskScore     int            `json:"overall_risk_score"`
-	OverallRiskLevel     string         `json:"overall_risk_level"`
-	FilesChangedCount    int            `json:"files_changed_count"`
-	SymbolsChangedCount  int            `json:"symbols_changed_count"`
-	TotalAffectedCallers int            `json:"total_affected_callers"`
-	BlindspotsCount      int            `json:"blindspots_count"`
-	ImpactedSymbols      []SymbolImpact `json:"impacted_symbols"`
-	SuggestedTestSuite   []string       `json:"suggested_test_suite"`
-	AnalysisDurationMS   int64          `json:"analysis_duration_ms"`
+	FormatVersion        int                  `json:"format_version"`
+	RepoRoot             string               `json:"repo_root"`
+	BaseRef              string               `json:"base_ref"`
+	HeadRef              string               `json:"head_ref"`
+	OverallRiskScore     int                  `json:"overall_risk_score"`
+	OverallRiskLevel     string               `json:"overall_risk_level"`
+	Completeness         AnalysisCompleteness `json:"completeness"`
+	FilesChangedCount    int                  `json:"files_changed_count"`
+	SymbolsChangedCount  int                  `json:"symbols_changed_count"`
+	TotalAffectedCallers int                  `json:"total_affected_callers"`
+	BlindspotsCount      int                  `json:"blindspots_count"`
+	ImpactedSymbols      []SymbolImpact       `json:"impacted_symbols"`
+	SuggestedTestSuite   []string             `json:"suggested_test_suite"`
+	AnalysisDurationMS   int64                `json:"analysis_duration_ms"`
 }
 
 func parseChangeRadarFlags(args []string) (changeRadarFlags, error) {
@@ -375,6 +400,57 @@ func buildChangeRadarReport(
 		}
 	}
 
+	// Compute Completeness & Evidence Tiering (Track 2: Graph is evidence, not an oracle)
+	completeness := AnalysisCompleteness{
+		Status:          "COMPLETE",
+		ConfidenceScore: 1.0,
+	}
+
+	var partialReasons []string
+	heuristicCount := 0
+	unverifiedCount := 0
+
+	for _, imp := range impacts {
+		switch imp.EvidenceTier {
+		case TierHeuristic:
+			heuristicCount++
+		case TierUnverified:
+			unverifiedCount++
+		}
+	}
+
+	if heuristicCount > 0 {
+		partialReasons = append(partialReasons, fmt.Sprintf("%d symbol(s) involve dynamic dispatch, reflection, or generated code (static graph is incomplete)", heuristicCount))
+	}
+	if unverifiedCount > 0 {
+		partialReasons = append(partialReasons, fmt.Sprintf("%d symbol(s) have unverified static claims (0 callers found in AST)", unverifiedCount))
+	}
+
+	if len(partialReasons) > 0 {
+		completeness.Status = "PARTIAL"
+		completeness.IsPartial = true
+		total := len(impacts)
+		if total == 0 {
+			total = 1
+		}
+		ratio := float64(total-heuristicCount-unverifiedCount) / float64(total)
+		if ratio < 0.3 {
+			completeness.ConfidenceScore = 0.50
+		} else {
+			completeness.ConfidenceScore = 0.50 + (ratio * 0.45)
+		}
+		completeness.PartialReasons = partialReasons
+		completeness.SafeFallbackCommands = []string{
+			"go test -v -race ./...",
+			"go vet ./...",
+		}
+		completeness.VerificationGuidelines = []string{
+			"Graph relationships are structural evidence, not an absolute oracle for dynamic dispatch.",
+			"Check reflection, dynamic RPC/HTTP registries, and interface method assertions manually.",
+			"Run package-wide tests with race detector enabled to verify dynamic runtime paths.",
+		}
+	}
+
 	return ChangeRadarReport{
 		FormatVersion:        1,
 		RepoRoot:             repoRoot,
@@ -382,6 +458,7 @@ func buildChangeRadarReport(
 		HeadRef:              headRef,
 		OverallRiskScore:     overallScore,
 		OverallRiskLevel:     riskScoreToLevel(overallScore),
+		Completeness:         completeness,
 		FilesChangedCount:    len(diffResult.Files),
 		SymbolsChangedCount:  len(impacts),
 		TotalAffectedCallers: totalCallersCount,
@@ -517,6 +594,38 @@ func analyzeSingleSymbolImpact(
 	)
 	impact.RiskLevel = riskScoreToLevel(impact.RiskScore)
 	impact.IsBlindspot = len(directCallers) > 0 && len(impact.CoveringTests) == 0
+
+	// Evidence Tiering & Completeness Detection (Track 2: Graph is evidence, not an oracle)
+	isGenerated := strings.HasSuffix(cleanFilePath, "_gen.go") || strings.HasSuffix(cleanFilePath, ".pb.go") || strings.Contains(cleanFilePath, ".generated.")
+	isDynamic := strings.Contains(change.NewSignature, "interface{}") ||
+		strings.Contains(change.NewSignature, "any") ||
+		strings.Contains(strings.ToLower(change.Name), "reflect") ||
+		strings.Contains(strings.ToLower(change.Name), "dynamic") ||
+		strings.Contains(strings.ToLower(change.Name), "dispatch")
+
+	if isGenerated {
+		impact.EvidenceTier = TierHeuristic
+		impact.EvidenceConfidence = "MEDIUM"
+		impact.RequiresVerification = true
+		impact.VerificationAdvice = "Auto-generated code; verify against source schema rather than relying solely on generated AST."
+		impact.RiskFactors = append(impact.RiskFactors, "⚠️ Heuristic evidence: Generated code may mask call relationships")
+	} else if isDynamic {
+		impact.EvidenceTier = TierHeuristic
+		impact.EvidenceConfidence = "MEDIUM"
+		impact.RequiresVerification = true
+		impact.VerificationAdvice = "Dynamic dispatch / reflection detected; static graph cannot guarantee all runtime invocation call-sites."
+		impact.RiskFactors = append(impact.RiskFactors, "⚠️ Heuristic evidence: Dynamic dispatch / reflection patterns detected")
+	} else if len(directCallers) == 0 && change.Type != "added" {
+		impact.EvidenceTier = TierUnverified
+		impact.EvidenceConfidence = "LOW"
+		impact.RequiresVerification = true
+		impact.VerificationAdvice = "0 static callers found in graph; verify whether this symbol is invoked via reflection, RPC, or HTTP routes."
+		impact.RiskFactors = append(impact.RiskFactors, "⚠️ Unverified claim: 0 static callers found in graph (verify runtime callers)")
+	} else {
+		impact.EvidenceTier = TierConfirmed
+		impact.EvidenceConfidence = "HIGH"
+		impact.RequiresVerification = false
+	}
 
 	return impact
 }
@@ -719,6 +828,25 @@ func renderChangeRadarText(out io.Writer, rep ChangeRadarReport) error {
 		rep.FilesChangedCount, rep.SymbolsChangedCount, rep.TotalAffectedCallers, rep.BlindspotsCount)
 	fmt.Fprintln(out, subdivider)
 
+	// Completeness & Evidence Certainty (Track 2 Curveball)
+	if rep.Completeness.IsPartial {
+		fmt.Fprintf(out, "⚠️  ANALYSIS CERTAINTY: [PARTIAL] (Confidence: %.0f%% — Graph is evidence, not an oracle)\n", rep.Completeness.ConfidenceScore*100)
+		fmt.Fprintln(out, "   Reason(s) for partial static certainty:")
+		for _, r := range rep.Completeness.PartialReasons {
+			fmt.Fprintf(out, "   • %s\n", r)
+		}
+		if len(rep.Completeness.SafeFallbackCommands) > 0 {
+			fmt.Fprintln(out, "   Safe Fallback Verification Commands:")
+			for _, fb := range rep.Completeness.SafeFallbackCommands {
+				fmt.Fprintf(out, "     ↳ %s\n", fb)
+			}
+		}
+		fmt.Fprintln(out, subdivider)
+	} else {
+		fmt.Fprintln(out, "✅ ANALYSIS CERTAINTY: [COMPLETE] (100% Confirmed Structural AST Evidence)")
+		fmt.Fprintln(out, subdivider)
+	}
+
 	if rep.BlindspotsCount > 0 {
 		fmt.Fprintf(out, "⚠️  ATTENTION: %d untested blast-radius blindspot(s) detected!\n", rep.BlindspotsCount)
 		fmt.Fprintln(out, "   Existing callers depend on these modified symbols, but no unit tests exercise them.")
@@ -733,11 +861,22 @@ func renderChangeRadarText(out io.Writer, rep ChangeRadarReport) error {
 	}
 	for i := 0; i < renderCount; i++ {
 		sym := rep.ImpactedSymbols[i]
-		fmt.Fprintf(out, "\n%d. %s (%s:%d) [%s - %s]\n",
-			i+1, sym.Name, sym.FilePath, sym.StartLine, sym.Kind, strings.ToUpper(sym.ChangeType))
+		tierLabel := "[CONFIRMED AST]"
+		switch sym.EvidenceTier {
+		case TierHeuristic:
+			tierLabel = "⚠️ [HEURISTIC]"
+		case TierUnverified:
+			tierLabel = "❓ [REQUIRES VERIFICATION]"
+		}
+
+		fmt.Fprintf(out, "\n%d. %s (%s:%d) [%s - %s] %s\n",
+			i+1, sym.Name, sym.FilePath, sym.StartLine, sym.Kind, strings.ToUpper(sym.ChangeType), tierLabel)
 		fmt.Fprintf(out, "   Risk: %s (%d/100)\n", sym.RiskLevel, sym.RiskScore)
 		for _, factor := range sym.RiskFactors {
 			fmt.Fprintf(out, "   • %s\n", factor)
+		}
+		if sym.RequiresVerification && sym.VerificationAdvice != "" {
+			fmt.Fprintf(out, "   ↳ Action: %s\n", sym.VerificationAdvice)
 		}
 
 		if len(sym.DirectCallers) > 0 {
@@ -800,6 +939,21 @@ func renderChangeRadarMarkdown(out io.Writer, rep ChangeRadarReport) error {
 	fmt.Fprintf(out, "**Overall Risk:** `%s` (Score: **%d/100**) | **Range:** `%s..%s`\n\n",
 		rep.OverallRiskLevel, rep.OverallRiskScore, rep.BaseRef, rep.HeadRef)
 
+	if rep.Completeness.IsPartial {
+		fmt.Fprintf(out, "> ⚠️ **Analysis Certainty: PARTIAL (%.0f%% Confidence)** — *Graph is evidence, not an oracle.*\n>\n", rep.Completeness.ConfidenceScore*100)
+		for _, r := range rep.Completeness.PartialReasons {
+			fmt.Fprintf(out, "> - %s\n", r)
+		}
+		if len(rep.Completeness.SafeFallbackCommands) > 0 {
+			fmt.Fprintf(out, ">\n> **Safe Fallback Verification:** `%s`\n\n", strings.Join(rep.Completeness.SafeFallbackCommands, " && "))
+		} else {
+			fmt.Fprintln(out)
+		}
+	} else {
+		fmt.Fprintln(out, "> ✅ **Analysis Certainty: COMPLETE** — *100% Confirmed Structural AST Evidence.*")
+		fmt.Fprintln(out)
+	}
+
 	fmt.Fprintln(out, "| Files Changed | Symbols Modified | Callers Affected | Test Blindspots |")
 	fmt.Fprintln(out, "| :--- | :--- | :--- | :--- |")
 	fmt.Fprintf(out, "| %d | %d | %d | %d |\n\n",
@@ -811,16 +965,24 @@ func renderChangeRadarMarkdown(out io.Writer, rep ChangeRadarReport) error {
 
 	fmt.Fprintln(out, "## 💥 Impact & Blast Radius Breakdown")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "| Symbol | Change | Risk | Callers | Covering Tests |")
-	fmt.Fprintln(out, "| :--- | :--- | :--- | :--- | :--- |")
+	fmt.Fprintln(out, "| Symbol | Change | Risk | Evidence Tier | Callers | Covering Tests |")
+	fmt.Fprintln(out, "| :--- | :--- | :--- | :--- | :--- | :--- |")
 	for _, sym := range rep.ImpactedSymbols {
 		callersCount := len(sym.DirectCallers) + len(sym.Transitive)
 		testsLabel := fmt.Sprintf("%d test(s)", len(sym.CoveringTests))
 		if callersCount > 0 && len(sym.CoveringTests) == 0 {
 			testsLabel = "**0 (Blindspot!)**"
 		}
-		fmt.Fprintf(out, "| `%s` (`%s`) | %s | **%s** (%d) | %d | %s |\n",
-			sym.Name, sym.FilePath, sym.ChangeType, sym.RiskLevel, sym.RiskScore, callersCount, testsLabel)
+		tierBadge := "Confirmed AST"
+		switch sym.EvidenceTier {
+		case TierHeuristic:
+			tierBadge = "⚠️ Heuristic"
+		case TierUnverified:
+			tierBadge = "❓ Unverified Claim"
+		}
+
+		fmt.Fprintf(out, "| `%s` (`%s`) | %s | **%s** (%d) | %s | %d | %s |\n",
+			sym.Name, sym.FilePath, sym.ChangeType, sym.RiskLevel, sym.RiskScore, tierBadge, callersCount, testsLabel)
 	}
 
 	if len(rep.SuggestedTestSuite) > 0 {
