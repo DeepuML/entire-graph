@@ -70,6 +70,7 @@ by eliminating exploration; when there is nothing to explore, skip it.
     impact  ->  entire graph impact --repo . --symbol X   (one shot: callers, callees, type consumers, data flow, co-change, siblings)
     callers ->  entire graph neighbors --repo . --symbol X --relation CALLS --direction in
     change  ->  entire graph diff --base A --head B --json
+    radar   ->  entire graph changeradar [--base A] [--head B] [--format markdown|text|json]
     detect  ->  entire graph capabilities --json   (inventory-only languages have no relations)
     stats   ->  entire graph stats --repo .        (human-facing token-savings report; not part of your workflow — do not run it unless asked)
 `

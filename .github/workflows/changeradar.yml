@@ -1,0 +1,56 @@
+name: ChangeRadar PR Intelligence
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  changeradar:
+    name: Semantic Blast Radius & Risk Assessment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: true
+
+      - name: Build entire-graph
+        run: go build -o entire-graph ./cmd/entire-graph
+
+      - name: Run ChangeRadar Analysis
+        id: analysis
+        run: |
+          ./entire-graph changeradar \
+            --repo . \
+            --base "origin/${{ github.base_ref || 'main' }}" \
+            --head HEAD \
+            --format markdown > changeradar-report.md
+
+          cat changeradar-report.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Comment PR Risk Report
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('changeradar-report.md', 'utf8');
+            const commentBody = `### 📡 Entire Graph ChangeRadar Intelligence\n\n${report}\n\n*Generated locally with Entire Graph tree-sitter static intelligence.*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: commentBody
+            });
