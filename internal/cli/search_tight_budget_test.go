@@ -19,6 +19,7 @@ import (
 // regresses, rather than only on the slow one.
 func TestTightAgentBudgetKeepsSourceAcrossHeaderWidths(t *testing.T) {
 	t.Parallel()
+	t.Setenv("ENTIRE_GRAPH_TEST_MOCK_LATENCY", "1")
 	repo := t.TempDir()
 	write(t, repo, "a.py", "def target():\n    return True\n")
 	for _, budget := range []string{"64", "60", "56", "52", "48"} {

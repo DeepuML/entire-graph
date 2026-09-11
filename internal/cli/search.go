@@ -1375,6 +1375,12 @@ func writeAgentSearch(out interface{ Write([]byte) (int, error) }, response sem.
 	out = termsafe.NewWriter(out)
 	results := orderAgentSearchResults(response.Results)
 	stats := response.Stats
+	if os.Getenv("ENTIRE_GRAPH_TEST_MOCK_LATENCY") == "1" {
+		stats.IndexLatencyMS = 1
+		stats.QueryLatencyMS = 1
+		stats.PreselectLatencyMS = 1
+		stats.TotalLatencyMS = 1
+	}
 	cacheState := "miss"
 	if stats.IndexCacheHit {
 		cacheState = "hit"
